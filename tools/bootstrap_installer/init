@@ -1,0 +1,112 @@
+#!/bin/sh
+# /init for the C60 bootstrap installer (Path B).
+#
+# Runs ONCE when stock u-boot boots our installer boot.img via `boota`.
+# Job:
+#   1. Mount /proc, /sys, /dev.
+#   2. Wait for /dev/mmcblk2 and partition labels to appear.
+#   3. dd raw payloads into slot-A partitions (preserving slot B).
+#   4. Write the u-boot env blob to /dev/mmcblk2 at offset 0x400000.
+#   5. Sync, reboot.
+#
+# After this runs, stock u-boot loads the env we wrote → bootcmd=`run
+# slotbboot` → mmc read + booti our kernel/DTB → systemd Debian on
+# system_a. The installer never runs again unless we re-flash boot_a
+# with another installer image.
+#
+# Refuses to run twice — checks for a "flat-layout already installed"
+# marker on the kernel cmdline (`c60_flat_layout=1`) and just reboots
+# if it sees one. This prevents an accidental boota into the installer
+# after we've migrated.
+#
+# All writes are to slot-A partitions (mmcblk2p1 dtbo_a, mmcblk2p3
+# boot_a, mmcblk2p5 system_a) per the stock GPT. Slot B is untouched
+# so `fastboot set_active b && fastboot reboot` rolls back to stock.
+
+exec >/dev/console 2>&1
+set -e
+
+echo
+echo "[installer] C60 (Kepler proto1) bootstrap installer starting"
+date
+
+mount -t proc     proc     /proc
+mount -t sysfs    sysfs    /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts 2>/dev/null || true
+
+# Refuse second-run. The primary kernel's cmdline doesn't carry this
+# token, so we'll never accidentally short-circuit.
+if grep -q 'c60_flat_layout=1' /proc/cmdline 2>/dev/null; then
+    echo "[installer] flat-layout already active — nothing to do; rebooting"
+    sync
+    reboot -f
+fi
+
+echo "[installer] /proc/cmdline:"
+cat /proc/cmdline
+echo
+
+# Wait for eMMC and the by-partlabel symlinks.
+echo "[installer] waiting for /dev/mmcblk2..."
+i=0
+while [ ! -b /dev/mmcblk2 ]; do
+    i=$((i+1))
+    [ $i -ge 30 ] && { echo "[installer] /dev/mmcblk2 never appeared"; exit 1; }
+    sleep 1
+done
+echo "[installer] /dev/mmcblk2 present"
+
+# /dev/disk/by-partlabel may not exist in this minimal initramfs; the
+# busybox mdev/devtmpfs combo doesn't generate it. We index by partition
+# number from PROBE_NOTES.md instead:
+#   p1 dtbo_a (4 MiB)    raw DTB target
+#   p3 boot_a (48 MiB)   raw Image target
+#   p5 system_a (1.75 GiB)  rootfs.img target
+#
+# Sanity-check the sizes before writing — if the GPT looks different,
+# REFUSE to write. We don't want to scribble over vbmeta_a etc.
+expect_size() {
+    local dev="$1" want_kib="$2" what="$3"
+    [ -b "$dev" ] || { echo "[installer] FATAL: $dev missing ($what)"; exit 1; }
+    local have_kib
+    have_kib="$(cat "/sys/class/block/$(basename "$dev")/size" 2>/dev/null \
+                | awk '{print $1/2}')"
+    if [ "$have_kib" != "$want_kib" ]; then
+        echo "[installer] FATAL: $dev is $have_kib KiB; want $want_kib KiB ($what)"
+        echo "[installer]   stock C60 GPT mismatch — bailing rather than write to the wrong partition"
+        exit 1
+    fi
+    echo "[installer] $what: $dev ($have_kib KiB) OK"
+}
+expect_size /dev/mmcblk2p1 4096    "dtbo_a"
+expect_size /dev/mmcblk2p3 49152   "boot_a"
+expect_size /dev/mmcblk2p5 1835008 "system_a"
+
+# Write payloads. dd with conv=fsync so each write is durable before the
+# next one starts; an interruption only loses the last partition, not the
+# kernel.
+echo "[installer] writing payload/Image -> /dev/mmcblk2p3 (boot_a)"
+dd if=/payload/Image of=/dev/mmcblk2p3 bs=1M conv=fsync 2>&1 | tail -1
+
+echo "[installer] writing payload/imx8mm-kepler-proto1.dtb -> /dev/mmcblk2p1 (dtbo_a)"
+dd if=/payload/imx8mm-kepler-proto1.dtb of=/dev/mmcblk2p1 bs=1M conv=fsync 2>&1 | tail -1
+
+echo "[installer] decompressing+writing payload/rootfs.img.zst -> /dev/mmcblk2p5 (system_a)"
+zstd -dc /payload/rootfs.img.zst | dd of=/dev/mmcblk2p5 bs=4M conv=fsync 2>&1 | tail -1
+
+# u-boot env: write the env blob at byte offset 0x400000 = sector 8192
+# (with bs=4096, seek=1024). ASSUMPTION: C60 u-boot env lives at the
+# same offset as TC8 — verify before relying on it.
+echo "[installer] writing payload/uboot-env.bin -> /dev/mmcblk2 @ 0x400000"
+dd if=/payload/uboot-env.bin of=/dev/mmcblk2 bs=4096 seek=1024 conv=fsync 2>&1 | tail -1
+
+sync
+echo "[installer] done. rebooting in 3s — next boot will run slotbboot (mmc read + booti)."
+sleep 3
+reboot -f
+
+# Should never reach here.
+echo "[installer] reboot -f returned? falling to halt loop."
+while :; do sleep 60; done

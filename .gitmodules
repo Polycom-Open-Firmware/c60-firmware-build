@@ -1,0 +1,4 @@
+[submodule "rootfs"]
+	path = rootfs
+	url = https://github.com/Polycom-Open-Firmware/c60-rootfs.git
+	branch = main

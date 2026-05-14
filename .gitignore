@@ -1,0 +1,32 @@
+# build outputs
+out/
+initramfs/out/
+tools/bootstrap_installer/out/
+rootfs/out/
+rootfs/work/
+
+# bootstrap-fetched
+linux-6.6/
+kernel-patches/
+vendored/avbtool/
+
+# signing keys (kept in /tmp/ by default, but also block here)
+*.pem
+*.key
+testkey*
+
+# secrets / per-user opts
+rootfs/authorized_keys
+rootfs/root_password
+
+# python/editor noise
+__pycache__/
+*.pyc
+*.swp
+.idea/
+.vscode/
+
+# misc
+*.log
+*.tmp
+kernel-patches
