@@ -1,0 +1,79 @@
+#!/bin/sh
+# C60 mainline bring-up initramfs /init.
+#
+# Goal: prove the kernel boots — mount the basics, bring up the LAN side of
+# the RTL DSA switch (DHCP if available), print a banner, and drop to an
+# interactive shell on ttymxc1.
+#
+# This init deliberately does NOT switch_root anywhere — there is no Debian
+# rootfs for the C60 yet. Adding one is a future milestone.
+
+exec >/dev/console 2>&1
+echo
+echo "[init] C60 (Kepler proto1) initramfs starting"
+
+# Mount basic VFS
+mount -t proc     proc     /proc
+mount -t sysfs    sysfs    /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts 2>/dev/null || true
+
+# Print the banner
+[ -f /etc/banner.txt ] && cat /etc/banner.txt
+
+echo "[init] /proc/cmdline:"
+cat /proc/cmdline
+echo
+
+# Bring up loopback + the DSA user port. The RTL8363NB-VB DSA driver names
+# user ports lan1..lanN. Each is tried in turn; the first one that gets DHCP
+# wins for `default route` purposes.
+ip link set lo up 2>/dev/null || true
+for iface in lan1 lan2 lan3 lan4 eth0; do
+    if ip link show "$iface" >/dev/null 2>&1; then
+        echo "[init] bringing up $iface"
+        ip link set "$iface" up
+    fi
+done
+
+# udhcpc on each present user port — background, don't block shell.
+# Standard busybox script at /usr/share/udhcpc/default.script may be
+# missing in this minimal initramfs; supply a script if so.
+if [ ! -x /usr/share/udhcpc/default.script ]; then
+    mkdir -p /usr/share/udhcpc
+    cat > /usr/share/udhcpc/default.script <<'EOS'
+#!/bin/sh
+case "$1" in
+  bound|renew)
+    ip addr flush dev "$interface"
+    ip addr add "$ip/$mask" dev "$interface"
+    [ -n "$router" ] && ip route add default via "${router%% *}" dev "$interface"
+    [ -n "$dns" ] && {
+      echo -n "" > /etc/resolv.conf
+      for d in $dns; do echo "nameserver $d" >> /etc/resolv.conf; done
+    }
+    ;;
+esac
+EOS
+    chmod +x /usr/share/udhcpc/default.script
+fi
+for iface in lan1 lan2 lan3 lan4 eth0; do
+    if ip link show "$iface" >/dev/null 2>&1; then
+        (udhcpc -i "$iface" -n -q -t 5 2>&1 | sed "s/^/[$iface] /" &)
+    fi
+done
+
+# Sleep a beat so DHCP output is collated with the messages above.
+sleep 1
+
+echo
+echo "[init] dropping to /bin/sh on ttymxc1 (detach with your terminal's escape sequence)"
+echo
+
+# Endless respawn loop so an accidental exit doesn't kernel-panic.
+while :; do
+    /bin/sh
+    echo "[init] shell exited — respawning (^Alt+SysRq+b to reboot)"
+    sleep 1
+done
