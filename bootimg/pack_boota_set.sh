@@ -23,6 +23,14 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Prefer the vendored AOSP mkbootimg (bundles the gki module that newer distro
+# packages import); fall back to a system mkbootimg for local dev.
+if [[ -f "$REPO_ROOT/vendored/mkbootimg/mkbootimg.py" ]]; then
+    MKBOOTIMG=(python3 "$REPO_ROOT/vendored/mkbootimg/mkbootimg.py")
+else
+    MKBOOTIMG=(mkbootimg)
+fi
+
 KERNEL=""
 DTB=""
 PROFILE=""
@@ -111,7 +119,7 @@ rm -f "$BOOT_IMG"
 
 # Note: header v0 + --second is the combo this u-boot requires,
 # NOT --dtb / header v2.
-mkbootimg \
+"${MKBOOTIMG[@]}" \
     --kernel "$KERNEL" \
     --second "$DTB" \
     --cmdline "$KERNEL_CMDLINE" \
