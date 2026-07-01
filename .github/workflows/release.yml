@@ -1,0 +1,86 @@
+name: Release build
+
+# Triggers on tag push (v*). Runs the full pipeline and attaches the slot-A
+# image set (boot.img + dtbo.img + vbmeta.img), the zstd-compressed rootfs, and
+# the raw Image + DTB as release assets. Runs on a free GitHub-hosted Ubuntu
+# runner.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # needed to create the release + upload assets
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out at the tag, with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0   # so `git describe --tags` works inside build.sh
+
+      - name: Install host prereqs (matches BUILDING.md)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              git build-essential bc bison flex libssl-dev libelf-dev \
+              crossbuild-essential-arm64 \
+              cpio gzip rsync zstd busybox-static \
+              debootstrap qemu-user-static binfmt-support \
+              u-boot-tools mkbootimg openssl python3
+
+      - name: Bootstrap kernel tree, patches, rootfs, avbtool
+        run: ./bootstrap.sh
+
+      - name: Build emmc target
+        run: sudo --preserve-env=PATH ./build.sh --profile=emmc
+
+      - name: Sanity check kernel size under BOOTM_LEN cap
+        run: |
+          size=$(stat -c%s out/emmc/Image)
+          if [ "$size" -gt 33554432 ]; then
+              echo "::error::Image is ${size} bytes — exceeds u-boot 32 MiB BOOTM_LEN cap"
+              exit 1
+          fi
+          echo "Image size OK: $size bytes"
+
+      - name: Assemble release assets
+        run: |
+          set -e
+          mkdir -p assets
+          cp out/emmc/boot.img                  assets/boot.img
+          cp out/emmc/dtbo.img                  assets/dtbo.img
+          cp out/emmc/vbmeta.img                assets/vbmeta.img
+          cp out/emmc/rootfs.img.zst            assets/rootfs.img.zst
+          cp out/emmc/Image                     assets/Image
+          cp out/emmc/imx8mm-kepler-proto1.dtb  assets/imx8mm-kepler-proto1.dtb
+          cp out/emmc/version.env               assets/version.env
+          ( cd assets && sha256sum * > SHA256SUMS )
+          ls -lh assets/
+
+      - name: Create GitHub release with all assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release create "$tag" \
+              --title "$tag" \
+              --generate-notes \
+              assets/boot.img \
+              assets/dtbo.img \
+              assets/vbmeta.img \
+              assets/rootfs.img.zst \
+              assets/Image \
+              assets/imx8mm-kepler-proto1.dtb \
+              assets/version.env \
+              assets/SHA256SUMS
+
+      - name: Upload artifacts (also kept on the workflow run for debugging)
+        uses: actions/upload-artifact@v4
+        with:
+          name: c60-firmware-${{ github.ref_name }}
+          path: assets/
+          retention-days: 30

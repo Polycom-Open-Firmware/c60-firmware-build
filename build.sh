@@ -131,17 +131,22 @@ if (( ! DRY_RUN )); then
     fi
 fi
 
-# Version stamp.
+# Version stamp — computed from all three repos (firmware-build, rootfs,
+# kernel-patches) before the rootfs build so rootfs/build.sh can stamp them
+# into /etc/c60-version. `git describe --tags --always --dirty` yields a clean
+# tag (e.g. v0.1.0) on a release, or "<sha>-dirty" on an in-progress build.
 C60_FW_VERSION="$(cd "$REPO_ROOT" && git describe --tags --always --dirty 2>/dev/null || echo unknown)"
+C60_ROOTFS_VERSION="$(cd "$DEFAULT_ROOTFS_DIR" && git describe --tags --always --dirty 2>/dev/null || echo unknown)"
+C60_PATCHES_VERSION="$(cd "$REPO_ROOT/kernel-patches" && git describe --tags --always --dirty 2>/dev/null || echo unknown)"
 C60_BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 C60_BUILD_HOST="$(hostname)"
-echo "[+] version: $C60_FW_VERSION  built $C60_BUILD_DATE on $C60_BUILD_HOST"
+echo "[+] version: $C60_FW_VERSION  rootfs=$C60_ROOTFS_VERSION  patches=$C60_PATCHES_VERSION"
 echo "[+] profile: $PROFILE"
 echo "[+] out:     $OUT"
 mkdir -p "$OUT"
 
 # Export version stamps so rootfs/build.sh can stamp /etc/c60-version.
-export C60_FW_VERSION C60_BUILD_DATE C60_BUILD_HOST
+export C60_FW_VERSION C60_ROOTFS_VERSION C60_PATCHES_VERSION C60_BUILD_DATE C60_BUILD_HOST
 
 # --- [1/4] rootfs tarball (lazy — only if missing) ---
 # Building the rootfs needs root for chroot, so re-invoke under sudo when not
@@ -161,7 +166,7 @@ elif [[ ! -e "$ROOTFS" ]]; then
         ( cd "$DEFAULT_ROOTFS_DIR" && ./build.sh )
     else
         ( cd "$DEFAULT_ROOTFS_DIR" && \
-          sudo --preserve-env=C60_FW_VERSION,C60_BUILD_DATE,C60_BUILD_HOST,C60_SSH_PUBKEY,C60_ROOT_PASSWORD \
+          sudo --preserve-env=C60_FW_VERSION,C60_ROOTFS_VERSION,C60_PATCHES_VERSION,C60_BUILD_DATE,C60_BUILD_HOST,C60_SSH_PUBKEY,C60_ROOT_PASSWORD \
               ./build.sh )
     fi
 else
@@ -233,9 +238,10 @@ if (( ! DRY_RUN )); then
 
     cat > "$OUT/version.env" <<EOF
 C60_FW_VERSION=$C60_FW_VERSION
+C60_ROOTFS_VERSION=$C60_ROOTFS_VERSION
+C60_PATCHES_VERSION=$C60_PATCHES_VERSION
 C60_BUILD_DATE=$C60_BUILD_DATE
 C60_BUILD_HOST=$C60_BUILD_HOST
-C60_PROFILE=$profile_name
 EOF
 
     sumset=( Image "$DTB_NAME" )

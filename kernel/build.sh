@@ -126,13 +126,15 @@ else
   done
 fi
 
-# --- Stage WiFi firmware blobs for CONFIG_EXTRA_FIRMWARE ---
-# Embedded in the Image so brcmfmac can load firmware before /lib/firmware
-# is mounted from system_a.
+# --- Stage WiFi + BT firmware blobs for CONFIG_EXTRA_FIRMWARE ---
+# Embedded in the Image so brcmfmac (WiFi) and hci_bcm (BT) can load their
+# firmware at probe time (~t+3s), before /lib/firmware is available from
+# system_a. BCM4356A2.hcd is the BT patchram (hci_bcm requests it by the
+# chip's LMP-derived name).
 FW_SRC="$REPO_ROOT/firmware-blobs"
 if [[ -d "$FW_SRC" ]]; then
     mkdir -p firmware/brcm
-    for blob in brcmfmac4356-pcie.bin brcmfmac4356-pcie.clm_blob brcmfmac4356-pcie.txt; do
+    for blob in brcmfmac4356-pcie.bin brcmfmac4356-pcie.clm_blob brcmfmac4356-pcie.txt BCM4356A2.hcd; do
         [[ -f "$FW_SRC/brcm/$blob" ]] && cp -f "$FW_SRC/brcm/$blob" "firmware/brcm/$blob"
     done
     echo "[+] staged brcm firmware blobs into firmware/brcm/"
