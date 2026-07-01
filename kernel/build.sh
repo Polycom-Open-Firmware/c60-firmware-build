@@ -126,7 +126,7 @@ else
   done
 fi
 
-# --- Stage WiFi + BT firmware blobs for CONFIG_EXTRA_FIRMWARE ---
+# --- Stage WiFi + BT + SDMA firmware blobs for CONFIG_EXTRA_FIRMWARE ---
 # Embedded in the Image so brcmfmac (WiFi) and hci_bcm (BT) can load their
 # firmware at probe time (~t+3s), before /lib/firmware is available from
 # system_a. BCM4356A2.hcd is the BT patchram (hci_bcm requests it by the
@@ -138,6 +138,12 @@ if [[ -d "$FW_SRC" ]]; then
         [[ -f "$FW_SRC/brcm/$blob" ]] && cp -f "$FW_SRC/brcm/$blob" "firmware/brcm/$blob"
     done
     echo "[+] staged brcm firmware blobs into firmware/brcm/"
+
+    # SAI multi-fifo (3x ADC3101 mic-array) capture DMA needs the i.MX SDMA
+    # RAM script; embed it so imx-sdma has it at probe, before /lib/firmware.
+    mkdir -p firmware/imx/sdma
+    [[ -f "$FW_SRC/imx/sdma/sdma-imx7d.bin" ]] && cp -f "$FW_SRC/imx/sdma/sdma-imx7d.bin" "firmware/imx/sdma/sdma-imx7d.bin"
+    echo "[+] staged imx sdma firmware into firmware/imx/sdma/"
 fi
 
 # --- Config: arm64 defconfig + the overlay fragment ---
