@@ -1,7 +1,13 @@
 # c60-firmware-build
 
+> **Superseded for builds.** C60 firmware now builds from the converged
+> [poly-firmware-build](https://github.com/Polycom-Open-Firmware/poly-firmware-build)
+> (`--target=c60`, one repo for both the TC8 and the C60). This repo is kept
+> as the C60 bring-up reference; the docs below describe the original
+> standalone flow.
+
 Mainline Linux 6.6 build pipeline for the **Poly Trio C60** (codename
-`kepler_proto1`, i.MX 8M Mini Quad). Sister to `tc8-firmware-build`.
+`kepler_proto1`, i.MX 8M Mini Quad).
 
 Builds a mainline kernel and a Debian bookworm arm64 Wayland/Cage kiosk rootfs,
 packaged as an Android boot.img slot-A image set. The C60 is HAB-open: the

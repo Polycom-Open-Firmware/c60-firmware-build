@@ -1,5 +1,9 @@
 # c60-firmware-build — build card
 
+> **Superseded:** build C60 firmware from the converged `poly-firmware-build`
+> (`--target=c60`). This repo is the historical standalone flow, kept as
+> bring-up reference.
+
 Builds the mainline Linux 6.6 kernel and a Debian rootfs for the Poly Trio C60
 (Kepler proto1, i.MX 8M Mini Quad), packaged as an Android boot.img slot-A image
 set. The board is HAB-open; `polycom-uboot` is loaded into RAM over SDP and
